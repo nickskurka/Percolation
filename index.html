@@ -75,6 +75,28 @@
             color: black;
             text-align: center;
         }
+        
+        .reset-button {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            padding: 8px 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        
+        .reset-button:hover {
+            background-color: #45a049;
+        }
+        
+        .reset-button:active {
+            background-color: #3e8e41;
+        }
     </style>
 </head>
 <body>
@@ -101,6 +123,7 @@
         </div>
 
         <div class="instructions">Space: Reset | Drag sliders: Change p and tick time</div>
+        <button class="reset-button" id="resetButton">Reset</button>
     </div>
 
     <script>
@@ -193,6 +216,11 @@
                 document.addEventListener('mouseup', () => {
                     this.pSliderDragging = false;
                     this.tickSliderDragging = false;
+                });
+
+                // Reset button event
+                document.getElementById('resetButton').addEventListener('click', () => {
+                    this.resetSimulation();
                 });
             }
 
