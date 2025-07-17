@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Percolation Simulation</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: white;
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        #gameContainer {
+            position: relative;
+        }
+
+        canvas {
+            border: 1px solid #ccc;
+            display: block;
+        }
+
+        .slider-container {
+            position: absolute;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 100px;
+        }
+
+        .slider-group {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .slider {
+            width: 300px;
+            height: 15px;
+            background-color: #c8c8c8;
+            border-radius: 8px;
+            position: relative;
+            cursor: pointer;
+        }
+
+        .slider-handle {
+            width: 20px;
+            height: 20px;
+            background-color: black;
+            border-radius: 50%;
+            position: absolute;
+            top: -2.5px;
+            cursor: pointer;
+            transition: none;
+        }
+
+        .slider-label {
+            font-size: 24px;
+            color: black;
+            margin-bottom: 5px;
+        }
+
+        .instructions {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 24px;
+            color: black;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <h1 style="text-align: center; margin-bottom: 5px; font-size: 32px; color: black;">Square Lattice Percolation</h1>
+        <h2 style="text-align: center; margin-top: 0; margin-bottom: 20px; font-size: 24px; color: #666;">Percolation Threshold p<sub>c</sub> ≈ 0.59274</h2>
+
+        <canvas id="gameCanvas" width="850" height="950"></canvas>
+
+        <div class="slider-container">
+            <div class="slider-group">
+                <div class="slider-label" id="pLabel">p = 0.50</div>
+                <div class="slider" id="pSlider">
+                    <div class="slider-handle" id="pHandle"></div>
+                </div>
+            </div>
+
+            <div class="slider-group">
+                <div class="slider-label" id="tickLabel">Tick time = 0.01s</div>
+                <div class="slider" id="tickSlider">
+                    <div class="slider-handle" id="tickHandle"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="instructions">Space: Reset | Drag sliders: Change p and tick time</div>
+    </div>
+
+    <script>
+        // Constants
+        const WINDOW_WIDTH = 850;
+        const WINDOW_HEIGHT = 950;
+        const GRID_SIZE = 100;
+        const GRID_START_X = 25;
+        const GRID_START_Y = 25;
+        const GRID_PIXEL_SIZE = 8;
+
+        // Colors
+        const WHITE = '#FFFFFF';
+        const GREY = '#808080';
+        const BLUE = '#0000FF';
+        const RED = '#FF0000';
+        const BLACK = '#000000';
+        const LIGHT_GREY = '#C8C8C8';
+
+        class PercolationSimulation {
+            constructor() {
+                this.canvas = document.getElementById('gameCanvas');
+                this.ctx = this.canvas.getContext('2d');
+
+                // Grid state: 0 = empty, 1 = filled, 2 = percolated
+                this.grid = Array(GRID_SIZE).fill().map(() => Array(GRID_SIZE).fill(0));
+                this.p = 0.5;
+                this.running = true;
+                this.percolating = false;
+                this.lastStepTime = Date.now();
+
+                // Tick time settings
+                this.tickTime = 0.01 // Match Python default
+                this.minTickTime = 0.01;
+                this.maxTickTime = 1.0;
+
+                // Slider elements
+                this.pSlider = document.getElementById('pSlider');
+                this.pHandle = document.getElementById('pHandle');
+                this.pLabel = document.getElementById('pLabel');
+                this.tickSlider = document.getElementById('tickSlider');
+                this.tickHandle = document.getElementById('tickHandle');
+                this.tickLabel = document.getElementById('tickLabel');
+
+                this.pSliderDragging = false;
+                this.tickSliderDragging = false;
+
+                // Performance optimization
+                this.needsRedraw = true;
+                this.lastDrawTime = 0;
+
+                this.setupEventListeners();
+                this.resetSimulation();
+                this.updateSliderPositions();
+                this.drawGrid(); // Initial draw
+                this.run();
+            }
+
+            setupEventListeners() {
+                // Keyboard events
+                document.addEventListener('keydown', (e) => {
+                    if (e.code === 'Space') {
+                        e.preventDefault();
+                        this.resetSimulation();
+                    }
+                });
+
+                // Mouse events for probability slider
+                this.pSlider.addEventListener('mousedown', (e) => {
+                    this.pSliderDragging = true;
+                    this.updatePSlider(e);
+                });
+
+                // Mouse events for tick time slider
+                this.tickSlider.addEventListener('mousedown', (e) => {
+                    this.tickSliderDragging = true;
+                    this.updateTickSlider(e);
+                });
+
+                // Global mouse events
+                document.addEventListener('mousemove', (e) => {
+                    if (this.pSliderDragging) {
+                        this.updatePSlider(e);
+                    }
+                    if (this.tickSliderDragging) {
+                        this.updateTickSlider(e);
+                    }
+                });
+
+                document.addEventListener('mouseup', () => {
+                    this.pSliderDragging = false;
+                    this.tickSliderDragging = false;
+                });
+            }
+
+            updatePSlider(e) {
+                const rect = this.pSlider.getBoundingClientRect();
+                const relativeX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+                this.p = relativeX / rect.width;
+                this.updateSliderPositions();
+            }
+
+            updateTickSlider(e) {
+                const rect = this.tickSlider.getBoundingClientRect();
+                const relativeX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+                const ratio = relativeX / rect.width;
+                this.tickTime = this.minTickTime + ratio * (this.maxTickTime - this.minTickTime);
+                this.updateSliderPositions();
+            }
+
+            updateSliderPositions() {
+                // Update probability slider
+                const pPosition = this.p * 100;
+                this.pHandle.style.left = `${pPosition}%`;
+                this.pLabel.textContent = `p = ${this.p.toFixed(2)}`;
+
+                // Update tick time slider
+                const tickRatio = (this.tickTime - this.minTickTime) / (this.maxTickTime - this.minTickTime);
+                const tickPosition = tickRatio * 100;
+                this.tickHandle.style.left = `${tickPosition}%`;
+                this.tickLabel.textContent = `Tick time = ${this.tickTime.toFixed(2)}s`;
+            }
+
+            resetSimulation() {
+                // Initialize all squares as white (empty)
+                this.grid = Array(GRID_SIZE).fill().map(() => Array(GRID_SIZE).fill(0));
+
+                // Set middle square to red (percolated)
+                const middle = Math.floor(GRID_SIZE / 2);
+                this.grid[middle][middle] = 2;
+
+                this.percolating = true;
+                this.lastStepTime = Date.now();
+                this.needsRedraw = true;
+            }
+
+            getNeighbors(row, col) {
+                const neighbors = [];
+                const directions = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+
+                for (const [dr, dc] of directions) {
+                    const newRow = row + dr;
+                    const newCol = col + dc;
+                    if (newRow >= 0 && newRow < GRID_SIZE && newCol >= 0 && newCol < GRID_SIZE) {
+                        neighbors.push([newRow, newCol]);
+                    }
+                }
+
+                return neighbors;
+            }
+
+            percolationStep() {
+                if (!this.percolating) {
+                    return;
+                }
+
+                // Find all current red squares
+                const redSquares = [];
+                for (let i = 0; i < GRID_SIZE; i++) {
+                    for (let j = 0; j < GRID_SIZE; j++) {
+                        if (this.grid[i][j] === 2) {
+                            redSquares.push([i, j]);
+                        }
+                    }
+                }
+
+                // If no red squares, stop percolating
+                if (redSquares.length === 0) {
+                    this.percolating = false;
+                    return;
+                }
+
+                // For each red square, try to spread to adjacent white squares with probability p
+                const newRedSquares = [];
+                for (const [row, col] of redSquares) {
+                    for (const [neighborRow, neighborCol] of this.getNeighbors(row, col)) {
+                        if (this.grid[neighborRow][neighborCol] === 0) { // White (empty) square
+                            if (Math.random() < this.p) { // With probability p
+                                this.grid[neighborRow][neighborCol] = 2; // Make it red
+                                newRedSquares.push([neighborRow, neighborCol]);
+                            }
+                        }
+                    }
+                }
+
+                // Turn all old red squares to blue
+                for (const [row, col] of redSquares) {
+                    this.grid[row][col] = 1; // Mark as blue (filled)
+                }
+
+                // If no new red squares were created, stop percolating
+                if (newRedSquares.length === 0) {
+                    this.percolating = false;
+                }
+
+                this.needsRedraw = true;
+            }
+
+            drawGrid() {
+                // Clear canvas only once
+                this.ctx.fillStyle = WHITE;
+                this.ctx.fillRect(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
+
+                // Batch drawing by color for better performance
+                const blueCells = [];
+                const redCells = [];
+
+                for (let i = 0; i < GRID_SIZE; i++) {
+                    for (let j = 0; j < GRID_SIZE; j++) {
+                        if (this.grid[i][j] === 1) { // Blue
+                            blueCells.push([i, j]);
+                        } else if (this.grid[i][j] === 2) { // Red
+                            redCells.push([i, j]);
+                        }
+                    }
+                }
+
+                // Draw all blue cells at once
+                if (blueCells.length > 0) {
+                    this.ctx.fillStyle = BLUE;
+                    for (const [i, j] of blueCells) {
+                        const x = GRID_START_X + j * GRID_PIXEL_SIZE;
+                        const y = GRID_START_Y + i * GRID_PIXEL_SIZE;
+                        this.ctx.fillRect(x, y, GRID_PIXEL_SIZE, GRID_PIXEL_SIZE);
+                    }
+                }
+
+                // Draw all red cells at once
+                if (redCells.length > 0) {
+                    this.ctx.fillStyle = RED;
+                    for (const [i, j] of redCells) {
+                        const x = GRID_START_X + j * GRID_PIXEL_SIZE;
+                        const y = GRID_START_Y + i * GRID_PIXEL_SIZE;
+                        this.ctx.fillRect(x, y, GRID_PIXEL_SIZE, GRID_PIXEL_SIZE);
+                    }
+                }
+
+                // Draw minimal grid lines (only outer border)
+                this.ctx.strokeStyle = GREY;
+                this.ctx.lineWidth = 1;
+                this.ctx.strokeRect(GRID_START_X, GRID_START_Y, GRID_SIZE * GRID_PIXEL_SIZE, GRID_SIZE * GRID_PIXEL_SIZE);
+            }
+
+            run() {
+                const gameLoop = () => {
+                    if (!this.running) return;
+
+                    const currentTime = Date.now();
+
+                    // Perform percolation step
+                    if (this.percolating && currentTime - this.lastStepTime >= this.tickTime * 1000) {
+                        this.percolationStep();
+                        this.lastStepTime = currentTime;
+                    }
+
+                    // Only redraw if something changed
+                    if (this.needsRedraw) {
+                        this.drawGrid();
+                        this.needsRedraw = false;
+                    }
+
+                    // Reduce frame rate for better performance
+                    setTimeout(gameLoop, 50); // ~20 FPS instead of 60
+                };
+
+                gameLoop();
+            }
+        }
+
+        // Start the simulation when the page loads
+        window.addEventListener('load', () => {
+            new PercolationSimulation();
+        });
+    </script>
+</body>
+</html>
